@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+bridge.log
+mimo_pass_token.json
+.secret_key
+*.db
+.DS_Store
