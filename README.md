@@ -65,6 +65,39 @@ curl http://127.0.0.1:4500/v1/chat/completions \
 - `passToken` 长期有效;若彻底过期,打开 MiMo Desktop 重新登录一次即可(bridge 会自动读到新值)
 - 工具结果残留清洗(MiMoML 文本解析 fallback)未实现:正常传 `tools` 时上游返回结构化 `tool_calls`,不经过该降级路径
 
+## 常驻运行(launchd 自启 + 崩溃自愈)
+
+手动 `python3 mimo_bridge.py` 在终端关闭/休眠后会挂。推荐注册为 macOS 用户服务:
+
+```bash
+# 1. 部署运行文件(注意: launchd 无 ~/Documents 访问权,须放 ~/.local)
+mkdir -p ~/.local/share/mimo2api
+cp mimo_bridge.py run_bridge.sh ~/.local/share/mimo2api/
+xattr -c ~/.local/share/mimo2api/*
+
+# 2. run_bridge.sh 内容
+cat > ~/.local/share/mimo2api/run_bridge.sh <<'SH'
+#!/bin/zsh
+export API_KEY="sk-your-key"
+export PORT="4500"
+exec /opt/homebrew/bin/python3 "$HOME/.local/share/mimo2api/mimo_bridge.py"
+SH
+chmod +x ~/.local/share/mimo2api/run_bridge.sh
+
+# 3. 注册 launchd 服务(崩溃自动拉起,开机自启)
+#    plist 示例: Label=com.mimo2api.bridge2
+#    ProgramArguments = /bin/zsh ~/.local/share/mimo2api/run_bridge.sh
+#    RunAtLoad + KeepAlive = true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mimo2api.bridge2.plist
+
+# 4. 验收
+curl http://127.0.0.1:4500/health
+```
+
+> 坑位记录:launchd 拉起的进程受 macOS TCC 管控,**没有 `~/Documents` 访问权限**,
+> 直接指向 Documents 下的脚本会得到 `EX_CONFIG`/`can't open input file`。
+> 部署到 `~/.local/share/` 即可绕开。
+
 ## License
 
 MIT
