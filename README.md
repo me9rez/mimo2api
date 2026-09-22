@@ -65,10 +65,6 @@ curl http://127.0.0.1:4500/v1/chat/completions \
 - `passToken` 长期有效;若彻底过期,打开 MiMo Desktop 重新登录一次即可(bridge 会自动读到新值)
 - 工具结果残留清洗(MiMoML 文本解析 fallback)未实现:正常传 `tools` 时上游返回结构化 `tool_calls`,不经过该降级路径
 
-## 致谢
-
-协议还原过程参考了 [Fly143/xiaomi-mimo-desktop-api](https://github.com/Fly143/xiaomi-mimo-desktop-api) 的公开文档,其 SSO 时序与本机逆向实测完全一致。本项目为其超轻量 Python 单文件实现(实时读 cookie 库,免导入、免退出 Desktop)。
-
 ## License
 
 MIT
