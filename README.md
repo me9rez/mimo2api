@@ -64,6 +64,7 @@ curl http://127.0.0.1:4500/v1/chat/completions \
 - `reasoning_content` 原样透传(标准 OpenAI 扩展字段,主流客户端兼容)
 - `passToken` 长期有效;若彻底过期,打开 MiMo Desktop 重新登录一次即可(bridge 会自动读到新值)
 - 工具结果残留清洗(MiMoML 文本解析 fallback)未实现:正常传 `tools` 时上游返回结构化 `tool_calls`,不经过该降级路径
+- `mimo-v2.6-pro-ultraspeed` 在 `/v1/models` 静态表里,但需付费套餐:邀测账号调用返回 400 `chat_model_not_for_plan_tier`(biz_code 41106)
 
 ## 常驻运行(launchd 自启 + 崩溃自愈)
 
@@ -97,6 +98,47 @@ curl http://127.0.0.1:4500/health
 > 坑位记录:launchd 拉起的进程受 macOS TCC 管控,**没有 `~/Documents` 访问权限**,
 > 直接指向 Documents 下的脚本会得到 `EX_CONFIG`/`can't open input file`。
 > 部署到 `~/.local/share/` 即可绕开。
+
+## Windows(本分支新增)
+
+Windows 上 MiMo Desktop 的 cookie 库同样是**明文**的(`value` 列,`encrypted_value` 为空),不用 DPAPI 解密,
+但有两点与 macOS 不同:
+
+1. 路径为 `%APPDATA%\Xiaomi MiMo\Partitions\xiaomi-account\Network\Cookies`(上游脚本只查 macOS/Linux 路径)
+2. **Desktop 运行时对该库加独占锁**(`ERROR_SHARING_VIOLATION`,连只读都打不开)→ 上游"无需退出 Desktop"的前提在 Windows 不成立
+
+因此本分支补了两个文件:
+
+| 文件 | 作用 |
+|---|---|
+| `dump_windows_token.py` | 退出 Desktop 后读一次 cookie 库,导出 `mimo_pass_token.json`(已在 `.gitignore` 中)。导出后 Desktop 开不开都不影响 bridge 启动 |
+| `mimo-bridge.ps1` | 单文件启动器 + 计划任务注册(取代 bat/vbs 组合);`-Hidden` 模式输出写入 `bridge.log` |
+
+```powershell
+# 1. 首次:完全退出 MiMo Desktop(含托盘图标),导出凭证(可选,但之后就再也不需要退出 Desktop)
+python dump_windows_token.py
+
+# 2. 前台启动 / 隐藏启动 / 状态
+powershell -NoProfile -File mimo-bridge.ps1
+powershell -NoProfile -File mimo-bridge.ps1 -Hidden
+powershell -NoProfile -File mimo-bridge.ps1 -Status
+
+# 3. 注册计划任务(登录自启 + 隐藏窗口 + 崩溃自愈:RestartCount 3 / 每 1 分钟)
+powershell -NoProfile -File mimo-bridge.ps1 -Install
+schtasks /run /tn mimo2api-bridge
+
+# 4. 验收
+curl http://127.0.0.1:4500/health
+```
+
+默认 `API_KEY=no-key-required`(`-ApiKey` 可改):本机 loopback 客户端如果按"本地服务无需鉴权"的约定填占位符,可以零配置接上。
+
+> 三个坑位记录:
+> 1. 计划任务的动作**必须同步等待**子进程(PowerShell 天然如此,`wscript` 的异步 `Run` 不行),
+>    否则任务被判定"已完成",`RestartCount`/`RestartInterval` 永远不会触发。
+> 2. `schtasks /end` 不会杀掉 bridge 的 python 子进程,要真重启得按端口找 PID 停掉。
+> 3. PowerShell 5.1 的 `*>>` 会把原生程序输出写成 UTF-16(日志里全是 `\0`),
+>    交给 `cmd /c` 做字节级重定向(`mimo-bridge.ps1` 已处理)。
 
 ## License
 

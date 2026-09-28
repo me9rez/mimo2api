@@ -162,6 +162,11 @@ def read_desktop_cookies() -> dict | None:
         home / "Library/Application Support/Xiaomi MiMo/Partitions/xiaomi-account/Network/Cookies",
         home / ".config/Xiaomi MiMo/Partitions/xiaomi-account/Network/Cookies",
     ]
+    # Windows: %APPDATA%\Xiaomi MiMo\...（与 macOS 同样的分区结构；cookie 同样为明文 value）
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        win_base = Path(appdata) / "Xiaomi MiMo" / "Partitions" / "xiaomi-account"
+        candidates += [win_base / "Network" / "Cookies", win_base / "Cookies"]
     src = next((p for p in candidates if p.exists()), None)
     if src is None:
         return None
@@ -186,6 +191,14 @@ def read_desktop_cookies() -> dict | None:
             "userId": jar.get("userId"),
             "cUserId": jar.get("cUserId"),
         }
+    except PermissionError:
+        # Windows: MiMo Desktop 运行时对 Cookies 库加独占锁（ERROR_SHARING_VIOLATION），无法拷贝
+        print(
+            f"[warn] cookie 库被占用，读不到 passToken：{src}\n"
+            "       请完全退出 MiMo Desktop 后重启本服务（Windows 上托盘退出即可）。",
+            file=sys.stderr,
+        )
+        return None
     except Exception:
         return None
     finally:
@@ -195,24 +208,33 @@ def read_desktop_cookies() -> dict | None:
             pass
 
 
+CRED_SOURCE = "unset"
+
+
 def load_credentials() -> dict:
+    global CRED_SOURCE
     env = os.environ.get("MIMO_PASS_TOKEN")
     if env:
+        CRED_SOURCE = "env (MIMO_PASS_TOKEN)"
         return {"passToken": env, "userId": os.environ.get("MIMO_USER_ID"), "cUserId": None}
     cred_file = HERE / "mimo_pass_token.json"
     if cred_file.exists():
         try:
             data = json.loads(cred_file.read_text())
             if data.get("passToken"):
+                CRED_SOURCE = f"file ({cred_file})"
                 return data
         except Exception:
             pass
     auto = read_desktop_cookies()
     if auto:
+        CRED_SOURCE = "desktop cookie db (auto)"
         return auto
     raise SystemExit(
         "no passToken found. Login to MiMo Desktop once, or set MIMO_PASS_TOKEN, "
-        f"or write {cred_file} with {{\"passToken\": \"...\"}}"
+        f"or write {cred_file} with {{\"passToken\": \"...\"}}\n"
+        "  Windows: MiMo Desktop 运行时对 cookie 库加独占锁，先退出 Desktop 再启动；"
+        "或用 dump_windows_token.py 导出 mimo_pass_token.json（之后 Desktop 可保持运行）。"
     )
 
 
@@ -520,7 +542,7 @@ def main():
     print(f"mimo2api bridge listening on http://{HOST}:{PORT}")
     print(f"  models: {', '.join(TEXT_MODELS)}")
     print(f"  api key: {API_KEY}")
-    print(f"  credential: {'env' if os.environ.get('MIMO_PASS_TOKEN') else 'desktop cookie db (auto)'}")
+    print(f"  credential: {CRED_SOURCE}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
